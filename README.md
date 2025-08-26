@@ -28,7 +28,7 @@ A simple, single-page Snake game with wall collision, sound effects, and high sc
 Game is playable at:
 
 ```
-https://kaidawswithai-bit.github.io/<repo-name>/
+https://kaidawswithai-bit.github.io/sg/
 ```
 
 ## License
