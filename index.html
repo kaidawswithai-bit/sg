@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Snake Game — Walls, Sound, High Score</title>
+  <style>
+    :root{--bg:#010103;--card:#0b1220;--accent:#6ae6a8;--muted:#b9c6e6;--panel:#0f1724}
+    *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:Inter, system-ui, sans-serif;color:var(--muted);background:var(--bg);width:100vw;overflow:hidden}
+    .overlay{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:40}
+    .start-btn{appearance:none;border:none;padding:14px 22px;font-size:18px;border-radius:10px;background:linear-gradient(180deg,#13203f,#0b1730);color:var(--muted);cursor:pointer}
+  .wrap{width:100vw;height:100vh;max-width:100vw;max-height:100vh;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;position:relative;justify-content:center;align-items:center}
+    .topbar{display:flex;justify-content:space-between;align-items:center}
+    .simple-btn{appearance:none;border:none;padding:8px 12px;border-radius:8px;background:var(--panel);color:var(--muted);cursor:pointer}
+    .simple-btn:active{transform:translateY(1px)}
+    .score{font-weight:700}
+  .board{background:#081222;border-radius:8px;padding:8px;display:flex;justify-content:center;align-items:center;width:100vw;height:calc(100vh - 80px);max-width:100vw;max-height:calc(100vh - 80px);}
+  canvas{display:block;width:100vw;height:calc(100vh - 80px);max-width:100vw;max-height:calc(100vh - 80px);border-radius:6px;background:#051025}
+    .controls-panel{position:absolute;right:16px;top:64px;background:rgba(12,18,32,.96);padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,.03);display:none}
+    .controls-panel.visible{display:block}
+    .mini-overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+    .panel{pointer-events:auto;background:rgba(8,12,22,.9);padding:16px;border-radius:10px;border:1px solid rgba(255,255,255,.03);text-align:center}
+    @media (max-width:520px){ .controls-panel{right:8px;top:56px} }
+  </style>
+</head>
+<body>
+  <div id="startOverlay" class="overlay">
+    <button id="startBtn" class="start-btn">Start</button>
+  </div>
+  <div id="app" class="wrap" style="display:none;">
+    <div class="topbar">
+      <div class="score">Score: <span id="score">0</span> | High: <span id="highScore">0</span></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="restartBtn" class="simple-btn">Restart</button>
+        <button id="controlsBtn" class="simple-btn">Controls</button>
+      </div>
+    </div>
+    <div class="board">
+      <canvas id="board" width="480" height="480"></canvas>
+      <div id="miniOverlay" class="mini-overlay" style="display:none">
+        <div class="panel">
+          <div style="font-weight:800;font-size:18px;margin-bottom:6px">Game Over</div>
+          <div style="margin-bottom:10px">Score: <span id="finalScore">0</span></div>
+          <div style="display:flex;gap:8px;justify-content:center">
+            <button id="miniRestart" class="simple-btn">Restart</button>
+            <button id="miniMenu" class="simple-btn">Menu</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="controlsPanel" class="controls-panel">
+      <div style="font-weight:700;margin-bottom:6px">Controls</div>
+      <div style="font-size:13px;line-height:1.4">
+        Arrow keys or WASD — move<br>
+        Space — pause / resume
+      </div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    const startOverlay=document.getElementById('startOverlay');
+    const startBtn=document.getElementById('startBtn');
+    const app=document.getElementById('app');
+    const board=document.getElementById('board');
+    const ctx=board.getContext('2d');
+    const scoreEl=document.getElementById('score');
+    const highScoreEl=document.getElementById('highScore');
+    const restartBtn=document.getElementById('restartBtn');
+    const controlsBtn=document.getElementById('controlsBtn');
+    const controlsPanel=document.getElementById('controlsPanel');
+    const miniOverlay=document.getElementById('miniOverlay');
+    const finalScore=document.getElementById('finalScore');
+    const miniRestart=document.getElementById('miniRestart');
+    const miniMenu=document.getElementById('miniMenu');
+
+    const GRID=20;
+    const SPEED=8;
+    let CELL=24;
+    let dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+
+    let snake=null,dir,nextDir,food,score=0,running=false,paused=false,lastTime=0;
+    let highScore=parseInt(localStorage.getItem('snakeHigh')||'0');
+    highScoreEl.textContent=highScore;
+
+    const eatSound=new Audio('https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg');
+    const dieSound=new Audio('https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg');
+
+    function resize(){
+      const maxSize = Math.min(window.innerWidth, window.innerHeight - 80); // 80px for topbar
+      const sz = Math.floor(maxSize/GRID)*GRID;
+      board.style.width = sz+'px';
+      board.style.height = sz+'px';
+      board.width = Math.floor(sz*dpr);
+      board.height = Math.floor(sz*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      CELL = sz/GRID;
+      draw();
+    }
+    window.addEventListener('resize',resize);
+
+    function init(){
+      const mid=Math.floor(GRID/2);
+      snake=[{x:mid-1,y:mid},{x:mid-2,y:mid},{x:mid-3,y:mid}];
+      dir={x:1,y:0};nextDir={x:1,y:0};
+      placeFood();
+      score=0;scoreEl.textContent=score;
+      running=true;paused=false;lastTime=0;miniOverlay.style.display='none';
+      requestAnimationFrame(loop);
+    }
+
+    function placeFood(){
+      const occupied=new Set(snake.map(s=>s.x+','+s.y));
+      let x,y;
+      do{x=Math.floor(Math.random()*GRID);y=Math.floor(Math.random()*GRID);}while(occupied.has(x+','+y));
+      food={x,y};
+    }
+
+    function setDir(nx,ny){if(nx===-dir.x&&ny===-dir.y)return;nextDir={x:nx,y:ny};}
+
+    window.addEventListener('keydown',e=>{
+      if(!running)return;
+      const k=e.key.toLowerCase();
+      if(k==='arrowup'||k==='w') {
+        setDir(0,-1);
+        if(k==='arrowup') e.preventDefault();
+      }
+      else if(k==='arrowdown'||k==='s') {
+        setDir(0,1);
+        if(k==='arrowdown') e.preventDefault();
+      }
+      else if(k==='arrowleft'||k==='a') setDir(-1,0);
+      else if(k==='arrowright'||k==='d') setDir(1,0);
+      else if(k===' ') {
+        paused=!paused;
+        e.preventDefault();
+      }
+    });
+
+    function loop(ts){
+      if(!running)return;
+      if(!lastTime)lastTime=ts;
+      if(ts-lastTime>1000/SPEED){step();lastTime=ts;}
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function step(){
+      if(paused||!snake)return;
+      dir=nextDir;
+      const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+      // Check wall collision
+      if(head.x<0||head.y<0||head.x>=GRID||head.y>=GRID){gameOver();return;}
+      if(snake.some(s=>s.x===head.x&&s.y===head.y)){gameOver();return;}
+      snake.unshift(head);
+      if(head.x===food.x&&head.y===food.y){score++;scoreEl.textContent=score;eatSound.play();placeFood();}
+      else snake.pop();
+    }
+
+    function draw(){
+      ctx.fillStyle='#051025';
+      ctx.fillRect(0,0,board.width/dpr,board.height/dpr);
+      if(!snake)return;
+      ctx.fillStyle='lime';
+      snake.forEach(s=>ctx.fillRect(s.x*CELL,s.y*CELL,CELL-1,CELL-1));
+      if(food){ctx.fillStyle='red';ctx.fillRect(food.x*CELL,food.y*CELL,CELL-1,CELL-1);}
+    }
+
+    function gameOver(){
+      running=false;dieSound.play();
+      miniOverlay.style.display='grid';
+      finalScore.textContent=score;
+      if(score>highScore){highScore=score;localStorage.setItem('snakeHigh',highScore);}
+      highScoreEl.textContent=highScore;
+    }
+
+    // UI buttons
+    startBtn.onclick=()=>{startOverlay.style.display='none';app.style.display='block';resize();init();};
+    restartBtn.onclick=()=>init();
+    controlsBtn.onclick=()=>controlsPanel.classList.toggle('visible');
+    miniRestart.onclick=()=>init();
+    miniMenu.onclick=()=>{app.style.display='none';startOverlay.style.display='grid';};
+  })();
+  </script>
+</body>
+</html>
